@@ -1,428 +1,313 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { AuthContext } from '../context/AuthContext';
-import ProjectChatModal from './ProjectChatModal';
-import NotificationModal from './NotificationModal';
-import { AlertTriangle, Send, FileText, Download, UploadCloud, Users, Plus, Trash2, MessageSquare, Calendar, MapPin, Bell } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Send, Paperclip, Trash2, MessageSquare, ExternalLink, Plus } from 'lucide-react';
 
-const API = 'http://localhost:5000/api/projects';
+export default function StudentDashboard({ currentUser, token, projects, loadData, SERVER_URL, API }) {
+  const [form, setForm] = useState({ title: '', domain: 'Distributed Systems', abstract: '', partnerEmail: '', document: null });
+  const [similarity, setSimilarity] = useState({ similarityIndex: 0, flagged: false, matchingTitle: '' });
+  const [commentText, setCommentText] = useState({});
+  const [submitError, setSubmitError] = useState('');
+  const [linkForms, setLinkForms] = useState({});
 
-export default function StudentDashboard() {
-  const { token, user } = useContext(AuthContext);
-  const [projects, setProjects] = useState([]);
-  const [form, setForm] = useState({
-    title: '',
-    domain: 'Distributed Systems',
-    abstract: ''
-  });
-  const [teamMembers, setTeamMembers] = useState([]);
-  const [memberInput, setMemberInput] = useState({ name: '', email: '' });
-  const [documentFile, setDocumentFile] = useState(null);
-  const [similarity, setSimilarity] = useState({ score: 0, flagged: false, matchingTitle: '' });
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [uploadingMilestone, setUploadingMilestone] = useState(null);
-  const [activeChatProject, setActiveChatProject] = useState(null);
-  const [activeNotificationProject, setActiveNotificationProject] = useState(null);
+  const getHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` });
 
-  const loadProjects = async () => {
-    try {
-      const res = await fetch(API, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) setProjects(await res.json());
-    } catch (err) {
-      console.error(err);
+  // Utility to handle missing http/https prefixes for external links
+  const formatExternalUrl = (url) => {
+    if (!url) return '#';
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      return `https://${url}`;
     }
+    return url;
   };
-
-  useEffect(() => {
-    loadProjects();
-  }, []);
 
   useEffect(() => {
     const timer = setTimeout(async () => {
-      if (form.title.trim().length > 5 || form.abstract.trim().length > 20) {
+      if (form.title.length > 2) {
         try {
-          const res = await fetch(`${API}/analyze`, {
+          const res = await fetch(`${API}/projects/analyze`, {
             method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({ title: form.title, abstract: form.abstract })
+            headers: getHeaders(),
+            body: JSON.stringify({ title: form.title })
           });
-          if (res.ok) setSimilarity(await res.json());
-        } catch (e) {
-          console.error(e);
-        }
-      } else {
-        setSimilarity({ score: 0, flagged: false, matchingTitle: '' });
+          if (res.ok) {
+            setSimilarity(await res.json());
+          }
+        } catch(e) {}
+      } else { 
+        setSimilarity({ similarityIndex: 0, flagged: false, matchingTitle: '' }); 
       }
-    }, 350);
-
+    }, 300);
     return () => clearTimeout(timer);
-  }, [form.title, form.abstract, token]);
+  }, [form.title]);
 
-  const addTeamMember = () => {
-    if (memberInput.name && memberInput.email) {
-      setTeamMembers([...teamMembers, memberInput]);
-      setMemberInput({ name: '', email: '' });
-    }
-  };
-
-  const removeTeamMember = (index) => {
-    setTeamMembers(teamMembers.filter((_, i) => i !== index));
-  };
-
-  const handleSubmit = async (e) => {
+  const submitProposal = async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
+    setSubmitError('');
 
     const formData = new FormData();
     formData.append('title', form.title);
     formData.append('domain', form.domain);
     formData.append('abstract', form.abstract);
-    formData.append('teamMembers', JSON.stringify(teamMembers));
-    if (documentFile) {
-      formData.append('document', documentFile);
-    }
+    formData.append('partnerEmail', form.partnerEmail);
+    formData.append('similarityIndex', similarity.similarityIndex || 0);
+    if (form.document) formData.append('document', form.document);
 
     try {
-      const res = await fetch(API, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
+      const res = await fetch(`${API}/projects`, { 
+        method: 'POST', 
+        headers: { 'Authorization': `Bearer ${token}` }, 
+        body: formData 
       });
-      if (res.ok) {
-        setForm({ title: '', domain: 'Distributed Systems', abstract: '' });
-        setTeamMembers([]);
-        setDocumentFile(null);
-        setSimilarity({ score: 0, flagged: false, matchingTitle: '' });
-        loadProjects();
+      const data = await res.json();
+
+      if (!res.ok) {
+        setSubmitError(data.error || 'Failed to submit proposal.');
+        return;
       }
+      
+      setForm({ title: '', domain: 'Distributed Systems', abstract: '', partnerEmail: '', document: null });
+      setSimilarity({ similarityIndex: 0, flagged: false, matchingTitle: '' });
+      
+      const fileInput = document.getElementById('file-upload');
+      if (fileInput) fileInput.value = '';
+      loadData();
     } catch (err) {
-      console.error(err);
-    } finally {
-      setIsSubmitting(false);
+      setSubmitError('Network error during submission.');
     }
   };
 
-  const handleMilestoneUpload = async (projectId, milestoneIndex, file) => {
+  const uploadExistingProjectDocument = async (projectId, file, inputElement) => {
     if (!file) return;
-    setUploadingMilestone(`${projectId}-${milestoneIndex}`);
-
     const formData = new FormData();
-    formData.append('milestoneFile', file);
-
-    try {
-      const res = await fetch(`${API}/${projectId}/milestones/${milestoneIndex}/upload`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        body: formData
-      });
-      if (res.ok) loadProjects();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setUploadingMilestone(null);
-    }
+    formData.append('document', file);
+    await fetch(`${API}/projects/${projectId}/document`, { 
+      method: 'POST', 
+      headers: { 'Authorization': `Bearer ${token}` }, 
+      body: formData 
+    });
+    if (inputElement) inputElement.value = '';
+    loadData();
   };
 
-  const getUnreadCount = (p) => {
-    const readCount = parseInt(localStorage.getItem(`read_notifs_${p._id}`) || '0', 10);
-    const total = (p.notifications || []).length;
-    return Math.max(0, total - readCount);
+  const removeDocument = async (projectId, fileUrl) => {
+    if (!window.confirm("Are you sure you want to remove this file?")) return;
+    const filename = fileUrl.split('/').pop();
+    await fetch(`${API}/projects/${projectId}/document/${filename}`, { method: 'DELETE', headers: getHeaders() });
+    loadData();
+  };
+
+  const addProjectLink = async (projectId) => {
+    const linkData = linkForms[projectId];
+    if (!linkData || !linkData.title || !linkData.url) return;
+
+    // Auto format URL before sending
+    const formattedUrl = formatExternalUrl(linkData.url);
+
+    await fetch(`${API}/projects/${projectId}/links`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ title: linkData.title, url: formattedUrl })
+    });
+
+    setLinkForms({ ...linkForms, [projectId]: { title: '', url: '' } });
+    loadData();
+  };
+
+  const removeProjectLink = async (projectId, linkId) => {
+    if (!window.confirm("Remove this link?")) return;
+    await fetch(`${API}/projects/${projectId}/links/${linkId}`, {
+      method: 'DELETE',
+      headers: getHeaders()
+    });
+    loadData();
+  };
+
+  const postComment = async (id) => {
+    if (!commentText[id]) return;
+    await fetch(`${API}/projects/${id}/comments`, { 
+      method: 'POST', 
+      headers: getHeaders(), 
+      body: JSON.stringify({ text: commentText[id] }) 
+    });
+    setCommentText({ ...commentText, [id]: '' });
+    loadData();
   };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-      {/* Proposal Submission Form */}
-      <div className="lg:col-span-5 bg-slate-900/50 border border-slate-800/80 rounded-2xl p-6 h-fit">
-        <h2 className="text-sm font-bold tracking-wider uppercase text-indigo-400 mb-4">
-          Submit Capstone Proposal
-        </h2>
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
+      <section className="lg:col-span-4 bg-slate-900/60 p-6 border border-slate-800 rounded-2xl space-y-4 h-fit">
+        <h2 className="text-sm font-bold uppercase">Submit Capstone Proposal</h2>
+        {submitError && <div className="p-3 bg-rose-500/10 text-rose-400 text-xs rounded-xl font-bold">{submitError}</div>}
+        
+        <form onSubmit={submitProposal} className="space-y-3 text-xs">
           <div>
-            <label className="block text-slate-400 font-medium mb-1">Project Title</label>
-            <input
-              type="text"
-              required
-              value={form.title}
-              onChange={e => setForm({ ...form, title: e.target.value })}
-              placeholder="e.g., Decentralized Byzantine Fault Tolerant Ledger"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none focus:border-indigo-500"
-            />
+            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Project Title</label>
+            <input type="text" placeholder="Enter title" required value={form.title} onChange={e => setForm({...form, title: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-2.5 rounded-xl text-white outline-none" />
           </div>
+
           <div>
-            <label className="block text-slate-400 font-medium mb-1">Domain Track</label>
-            <select
-              value={form.domain}
-              onChange={e => setForm({ ...form, domain: e.target.value })}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none focus:border-indigo-500"
-            >
-              <option value="Distributed Systems">Distributed Systems</option>
-              <option value="Computer Vision">Computer Vision</option>
-              <option value="NLP">NLP</option>
-              <option value="Cybersecurity">Cybersecurity</option>
-              <option value="Cloud">Cloud</option>
+            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Domain Track</label>
+            <select value={form.domain} onChange={e => setForm({...form, domain: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-2.5 rounded-xl text-white outline-none">
+              <option>Distributed Systems</option>
+              <option>Machine Learning</option>
+              <option>Cybersecurity</option>
+              <option>Web Development</option>
             </select>
           </div>
+
           <div>
-            <label className="block text-slate-400 font-medium mb-1">Technical Abstract (min 20 characters)</label>
-            <textarea
-              required
-              rows={4}
-              value={form.abstract}
-              onChange={e => setForm({ ...form, abstract: e.target.value })}
-              placeholder="Detail your system architecture, problem domain, and theoretical methodology..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-white focus:outline-none focus:border-indigo-500"
+            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Technical Abstract (min 20 characters)</label>
+            <textarea placeholder="Abstract & Methodology" rows={4} required value={form.abstract} onChange={e => setForm({...form, abstract: e.target.value})} className="w-full bg-slate-950 border border-slate-800 p-2.5 rounded-xl text-white outline-none" />
+          </div>
+          
+          <div>
+            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Multi-Member Student Group (Optional)</label>
+            <input 
+              type="email" 
+              placeholder="Partner Institutional Email" 
+              value={form.partnerEmail} 
+              onChange={e => setForm({...form, partnerEmail: e.target.value})} 
+              className="w-full bg-slate-950 border border-slate-800 p-2.5 rounded-xl text-white outline-none" 
             />
           </div>
 
-          {/* Multi-Member Student Group Section */}
-          <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-            <label className="block text-slate-400 font-medium flex items-center gap-1.5">
-              <Users className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Multi-Member Student Group (Optional)</span>
-            </label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                placeholder="Partner Name"
-                value={memberInput.name}
-                onChange={(e) => setMemberInput({ ...memberInput, name: e.target.value })}
-                className="w-1/2 bg-slate-900 border border-slate-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500"
-              />
-              <input
-                type="email"
-                placeholder="Partner Email"
-                value={memberInput.email}
-                onChange={(e) => setMemberInput({ ...memberInput, email: e.target.value })}
-                className="w-1/2 bg-slate-900 border border-slate-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500"
-              />
-              <button
-                type="button"
-                onClick={addTeamMember}
-                className="px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg flex items-center justify-center cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-              </button>
-            </div>
-            {teamMembers.length > 0 && (
-              <div className="space-y-1 pt-1">
-                {teamMembers.map((m, i) => (
-                  <div key={i} className="flex justify-between items-center bg-slate-900 px-2.5 py-1.5 rounded-lg text-[11px]">
-                    <span className="text-slate-200">{m.name} ({m.email})</span>
-                    <button type="button" onClick={() => removeTeamMember(i)} className="text-rose-400 hover:text-rose-300">
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
           <div>
-            <label className="block text-slate-400 font-medium mb-1">Proposal Document (.pdf, .doc, .docx)</label>
-            <input
-              type="file"
-              accept=".pdf,.doc,.docx"
-              onChange={(e) => setDocumentFile(e.target.files[0])}
-              className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700 cursor-pointer"
+            <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Proposal Document (.pdf, .doc, .docx)</label>
+            <input 
+              id="file-upload"
+              type="file" 
+              accept=".pdf,.doc,.docx,.zip"
+              onChange={e => setForm({...form, document: e.target.files[0]})}
+              className="w-full bg-slate-950 border border-slate-800 p-2 rounded-xl text-slate-400 file:mr-4 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-white hover:file:bg-slate-700 outline-none cursor-pointer"
             />
           </div>
-
-          {/* Lexical Overlap Index */}
+          
           <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-1">
-            <div className="flex justify-between items-center">
-              <span className="text-slate-400 font-medium">Lexical Overlap Index:</span>
-              <span className={`font-mono font-bold ${similarity.flagged ? 'text-rose-400' : 'text-emerald-400'}`}>
-                {similarity.score}%
-              </span>
+            <div className="flex justify-between font-bold">
+              <span className="text-slate-400">Lexical Overlap Index:</span>
+              <span className={similarity.flagged ? 'text-rose-400' : 'text-emerald-400'}>{similarity.similarityIndex || 0}%</span>
             </div>
-            {similarity.flagged && (
-              <div className="flex items-start gap-1.5 text-rose-400/90 text-[11px] mt-1 pt-1 border-t border-slate-800">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <span>Conflicts with: &quot;{similarity.matchingTitle}&quot; (&ge; 60%)</span>
-              </div>
-            )}
+            {similarity.flagged && <div className="text-rose-400 text-[11px]">Conflict with existing title: "{similarity.matchingTitle}"</div>}
           </div>
 
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 cursor-pointer"
-          >
-            <Send className="w-4 h-4" />
-            {isSubmitting ? 'Transmitting...' : 'Transmit Proposal'}
-          </button>
+          <button type="submit" className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-bold flex justify-center items-center gap-2"><Send className="w-4 h-4"/> Transmit Proposal</button>
         </form>
-      </div>
+      </section>
 
-      {/* Projects List */}
-      <div className="lg:col-span-7 space-y-4">
-        <h2 className="text-sm font-bold tracking-wider uppercase text-slate-400">My Submissions</h2>
+      <section className="lg:col-span-8 space-y-4">
+        <h2 className="text-lg font-bold">My Submissions</h2>
+        
         {projects.length === 0 ? (
-          <div className="p-8 text-center border border-slate-800/80 rounded-2xl text-slate-500 text-xs">
+          <div className="p-12 text-center text-slate-500 bg-slate-900/30 rounded-xl border border-slate-800 border-dashed">
             No proposals filed under this student identity.
           </div>
-        ) : (
-          projects.map(p => {
-            const unread = getUnreadCount(p);
-            return (
-              <div key={p._id} className="p-5 bg-slate-900/50 border border-slate-800/80 rounded-2xl space-y-3">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h3 className="font-bold text-white text-sm">{p.title}</h3>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-indigo-400 font-mono tracking-wider uppercase">{p.domain}</span>
-                      {p.teamMembers && p.teamMembers.length > 0 && (
-                        <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded-full flex items-center gap-1">
-                          <Users className="w-2.5 h-2.5 text-indigo-400" /> {p.teamMembers.length + 1} Team Members
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* Activity Bell with Badging */}
-                    <button
-                      onClick={() => setActiveNotificationProject(p)}
-                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition relative cursor-pointer"
-                      title="View Changes & Notifications"
-                    >
-                      <Bell className="w-3.5 h-3.5" />
-                      {unread > 0 && (
-                        <span className="absolute -top-1 -right-1 bg-rose-500 text-white font-mono text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
-                          {unread}
-                        </span>
-                      )}
-                    </button>
-
-                    <button
-                      onClick={() => setActiveChatProject(p)}
-                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-indigo-400 rounded-lg transition relative cursor-pointer"
-                      title="Open Consultation Thread"
-                    >
-                      <MessageSquare className="w-3.5 h-3.5" />
-                      {p.messages?.length > 0 && (
-                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full" />
-                      )}
-                    </button>
-
-                    <span className={`px-2.5 py-1 rounded-md text-[10px] font-bold ${
-                      p.status === 'Approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                      p.status === 'Flagged Conflict' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                      p.status === 'Rejected' ? 'bg-slate-800 text-slate-400' :
-                      'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                    }`}>
-                      {p.status}
-                    </span>
-                  </div>
+        ) : projects.map(p => (
+          <div key={p._id} className="p-5 bg-slate-900/60 border border-slate-800 rounded-xl space-y-3">
+            <div className="flex justify-between items-start">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] uppercase text-indigo-400 font-bold">{p.domain}</span>
+                  <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 rounded text-[9px] font-bold border border-indigo-500/20">{p.faculty} • {p.batch}</span>
                 </div>
-
-                <p className="text-xs text-slate-400 leading-relaxed">{p.abstract}</p>
-
-                {/* Viva Schedule Info */}
-                {p.vivaSchedule?.scheduledDate && (
-                  <div className="p-3 bg-indigo-950/30 border border-indigo-500/20 rounded-xl flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2 text-indigo-300">
-                      <Calendar className="w-4 h-4 text-indigo-400" />
-                      <span>Viva Voce: <strong>{new Date(p.vivaSchedule.scheduledDate).toLocaleString()}</strong></span>
+                <h3 className="font-bold text-white text-base">{p.title}</h3>
+              </div>
+              <span className={`px-2.5 py-1 rounded text-xs font-bold h-fit ${p.status === 'Approved' ? 'bg-emerald-500/10 text-emerald-400' : p.status === 'Flagged Conflict' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'}`}>{p.status}</span>
+            </div>
+            <p className="text-xs text-slate-400">{p.abstract}</p>
+            
+            {p.documents && p.documents.length > 0 && (
+              <div className="pt-3 space-y-2">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase">Attached Documents</h4>
+                <div className="flex flex-wrap gap-2">
+                  {p.documents.map((doc, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg p-1.5 pr-3">
+                      <a href={`${SERVER_URL}${doc.url}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-2 py-1 hover:bg-slate-900 text-indigo-400 text-[11px] font-bold rounded transition">
+                        <Paperclip className="w-3.5 h-3.5" /> 
+                        <span className="truncate max-w-[150px]">{doc.name || `File ${idx + 1}`}</span>
+                      </a>
+                      <button onClick={() => removeDocument(p._id, doc.url)} className="p-1 hover:bg-rose-500/20 text-rose-400 rounded transition" title="Remove File">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                    <div className="flex items-center gap-1 text-slate-400 text-[11px]">
-                      <MapPin className="w-3.5 h-3.5 text-slate-500" />
-                      <span>{p.vivaSchedule.venue}</span>
-                    </div>
-                  </div>
-                )}
+                  ))}
+                </div>
+              </div>
+            )}
 
-                {p.documentPath && (
-                  <div className="pt-2">
-                    <a
-                      href={`http://localhost:5000${p.documentPath}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-xs text-indigo-400 hover:text-indigo-300 transition"
-                    >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span>View Uploaded Proposal Report</span>
-                      <Download className="w-3 h-3 ml-1 text-slate-500" />
-                    </a>
-                  </div>
-                )}
+            {p.status === 'Approved' && (
+              <div className="pt-3 space-y-2 border-t border-slate-800">
+                <h4 className="text-[10px] font-bold text-slate-400 uppercase">Project Links (GitHub / Deployed App)</h4>
                 
-                {/* Milestones Grid */}
-                <div className="pt-3 border-t border-slate-800">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Milestones &amp; Submissions</span>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
-                    {p.milestones && p.milestones.map((m, idx) => (
-                      <div key={idx} className="p-3 bg-slate-950 rounded-xl border border-slate-800/80 flex flex-col justify-between space-y-2">
-                        <div>
-                          <span className="text-slate-300 font-medium truncate block">{m.title}</span>
-                          <div className="flex justify-between items-center mt-1">
-                            <span className={`text-[9px] font-bold ${
-                              m.status === 'Approved' ? 'text-emerald-400' :
-                              m.status === 'In Progress' ? 'text-indigo-400' : 'text-slate-500'
-                            }`}>
-                              {m.status}
-                            </span>
-                            {m.deadline && (
-                              <span className="text-[9px] text-slate-500 font-mono">
-                                Due {new Date(m.deadline).toLocaleDateString()}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-800/60">
-                          {m.documentPath ? (
-                            <a
-                              href={`http://localhost:5000${m.documentPath}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] text-indigo-400 hover:underline inline-flex items-center gap-1"
-                            >
-                              <FileText className="w-3 h-3" /> Submitted Deliverable
-                            </a>
-                          ) : (
-                            <label className="cursor-pointer inline-flex items-center gap-1 text-[10px] text-slate-400 hover:text-white transition">
-                              <UploadCloud className="w-3 h-3 text-indigo-400" />
-                              <span>{uploadingMilestone === `${p._id}-${idx}` ? 'Uploading...' : 'Upload File'}</span>
-                              <input
-                                type="file"
-                                className="hidden"
-                                accept=".pdf,.doc,.docx"
-                                onChange={(e) => handleMilestoneUpload(p._id, idx, e.target.files[0])}
-                              />
-                            </label>
-                          )}
-                        </div>
+                {p.links && p.links.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {p.links.map(link => (
+                      <div key={link._id} className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5">
+                        <ExternalLink className="w-3.5 h-3.5 text-indigo-400" />
+                        <a href={formatExternalUrl(link.url)} target="_blank" rel="noreferrer" className="text-indigo-400 text-xs font-bold hover:underline">
+                          {link.title}
+                        </a>
+                        <button onClick={() => removeProjectLink(p._id, link._id)} className="text-rose-400 hover:text-rose-300 ml-1">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
                     ))}
                   </div>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                  <input 
+                    type="text" 
+                    placeholder="Link Title (e.g., GitHub Repo)" 
+                    value={linkForms[p._id]?.title || ''}
+                    onChange={e => setLinkForms({...linkForms, [p._id]: { ...linkForms[p._id], title: e.target.value }})}
+                    className="bg-slate-950 border border-slate-800 text-xs p-2 rounded-lg outline-none w-1/3 text-white"
+                  />
+                  <input 
+                    type="text" 
+                    placeholder="github.com/... or https://..." 
+                    value={linkForms[p._id]?.url || ''}
+                    onChange={e => setLinkForms({...linkForms, [p._id]: { ...linkForms[p._id], url: e.target.value }})}
+                    className="bg-slate-950 border border-slate-800 text-xs p-2 rounded-lg outline-none flex-1 text-white"
+                  />
+                  <button onClick={() => addProjectLink(p._id)} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-xs font-bold rounded-lg flex items-center gap-1">
+                    <Plus className="w-3.5 h-3.5"/> Add Link
+                  </button>
                 </div>
               </div>
-            );
-          })
-        )}
-      </div>
+            )}
+            
+            <div className="flex flex-col sm:flex-row justify-between sm:items-center text-[11px] pt-3 border-t border-slate-800 text-slate-500 font-bold gap-2">
+              <div className="flex items-center gap-4">
+                <span>Team: {p.teamMembers ? p.teamMembers.map(m => m.name).join(', ') : p.studentName}</span>
+                <span>Guide: {p.supervisor}</span>
+              </div>
+              <span className={p.similarityIndex >= 60 ? 'text-rose-400' : 'text-emerald-400'}>{p.similarityIndex}% Match</span>
+            </div>
 
-      {activeChatProject && (
-        <ProjectChatModal
-          project={activeChatProject}
-          onClose={() => setActiveChatProject(null)}
-          onUpdate={loadProjects}
-        />
-      )}
+            <div className="pt-3 border-t border-slate-800 mt-3">
+              <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Attach Final Document / Update File</label>
+              <input 
+                type="file" 
+                accept=".pdf,.doc,.docx,.zip"
+                onChange={(e) => uploadExistingProjectDocument(p._id, e.target.files[0], e.target)}
+                className="text-[11px] text-slate-400 file:mr-2 file:py-1 file:px-2 file:rounded-lg file:border-0 file:font-bold file:bg-slate-800 file:text-white hover:file:bg-slate-700 cursor-pointer w-full outline-none"
+              />
+            </div>
 
-      {activeNotificationProject && (
-        <NotificationModal
-          project={activeNotificationProject}
-          onClose={() => {
-            setActiveNotificationProject(null);
-            loadProjects();
-          }}
-        />
-      )}
+            <div className="pt-4 space-y-2 mt-4">
+              <h4 className="text-xs font-bold text-slate-300 flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5"/> Feedback Thread</h4>
+              {p.comments?.map((c, i) => (
+                <div key={i} className="text-[11px] bg-slate-950 p-2 rounded-lg text-slate-300 border border-slate-800/50">
+                  <strong className="text-indigo-400">{c.author}:</strong> {c.text}
+                </div>
+              ))}
+              <div className="flex gap-2 mt-2">
+                <input type="text" value={commentText[p._id] || ''} onChange={e => setCommentText({...commentText, [p._id]: e.target.value})} placeholder="Add a comment..." className="flex-1 bg-slate-950 border border-slate-800 text-xs p-2 rounded-lg outline-none focus:border-indigo-500"/>
+                <button onClick={() => postComment(p._id)} className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-xs rounded-lg font-bold transition">Post</button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </section>
     </div>
   );
 }

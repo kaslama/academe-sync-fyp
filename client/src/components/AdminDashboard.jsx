@@ -1,396 +1,398 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { AuthContext } from '../context/AuthContext';
-import DossierModal from './DossierModal';
-import NotificationModal from './NotificationModal';
-import { 
-  ShieldAlert, FolderGit2, CheckCircle2, Clock, RefreshCw, 
-  Search, Filter, Trash2, FileSpreadsheet, Bell, AlertTriangle,
-  Users, UserCheck, User, UserPlus
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { FileText, BarChart2, Layout, Users, Trash2, Filter, Paperclip, ExternalLink, X, ChevronDown, ChevronUp, CheckCircle, AlertTriangle, ShieldCheck, UserCheck } from 'lucide-react';
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 
-const API = 'http://localhost:5000/api/projects';
+const COLORS = ['#6366f1', '#10b981', '#f43f5e', '#f59e0b', '#8b5cf6'];
 
-export default function AdminDashboard() {
-  const { token } = useContext(AuthContext);
-  const [projects, setProjects] = useState([]);
-  const [supervisors, setSupervisors] = useState([]);
-  const [pendingUsers, setPendingUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [filterDomain, setFilterDomain] = useState('All');
-  const [selectedDossierProject, setSelectedDossierProject] = useState(null);
-  const [activeNotificationProject, setActiveNotificationProject] = useState(null);
+export default function AdminDashboard({ currentUser, token, projects, stats, supervisorsList, allUsers, loadData, SERVER_URL, API }) {
+  const [activeTab, setActiveTab] = useState('feed');
+  const [filterFaculty, setFilterFaculty] = useState('ALL');
+  const [filterBatch, setFilterBatch] = useState('ALL');
+  const [filterAllocation, setFilterAllocation] = useState('ALL');
 
-  const fetchTelemetry = async () => {
-    setLoading(true);
-    try {
-      const [projRes, supRes, pendingRes] = await Promise.all([
-        fetch(API, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/supervisors`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('http://localhost:5000/api/auth/pending-users', { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-      if (projRes.ok) setProjects(await projRes.json());
-      if (supRes.ok) setSupervisors(await supRes.json());
-      if (pendingRes.ok) setPendingUsers(await pendingRes.json());
-    } catch (e) {
-      console.error('Failed to load telemetry', e);
-    } finally {
-      setLoading(false);
-    }
+  const [userFilterRole, setUserFilterRole] = useState('ALL');
+  const [userFilterFaculty, setUserFilterFaculty] = useState('ALL');
+  const [userFilterBatch, setUserFilterBatch] = useState('ALL');
+
+  const [expandedUserId, setExpandedUserId] = useState(null);
+  const [selectedProjectModal, setSelectedProjectModal] = useState(null);
+
+  const getHeaders = () => ({ 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` });
+
+  const assignSupervisor = async (id, supervisorName) => {
+    await fetch(`${API}/projects/${id}`, { method: 'PATCH', headers: getHeaders(), body: JSON.stringify({ supervisor: supervisorName }) });
+    loadData();
   };
 
-  useEffect(() => {
-    fetchTelemetry();
-  }, []);
-
-  const handleAllotSupervisor = async (projectId, supervisorId) => {
-    const selected = supervisors.find(s => s._id === supervisorId);
-    if (!selected) return;
-    try {
-      const res = await fetch(`${API}/${projectId}/allot`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ supervisorId: selected._id, supervisorName: selected.name })
-      });
-      if (res.ok) fetchTelemetry();
-    } catch (err) {
-      console.error('Allotment failed', err);
-    }
+  const deleteProject = async (projectId) => {
+    if (!window.confirm("Permanently delete this proposal?")) return;
+    await fetch(`${API}/projects/${projectId}`, { method: 'DELETE', headers: getHeaders() });
+    loadData();
   };
 
-  const handleDeleteProject = async (id, title) => {
-    if (!window.confirm(`Purge proposal "${title}"? This will notify the student.`)) return;
-    try {
-      const res = await fetch(`${API}/${id}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) fetchTelemetry();
-    } catch (err) {
-      console.error('Purge failed', err);
-    }
+  const verifyUser = async (userId) => {
+    await fetch(`${API}/users/${userId}/verify`, { method: 'PATCH', headers: getHeaders() });
+    loadData();
   };
 
-  const handleApproveUser = async (id) => {
-    await fetch(`http://localhost:5000/api/auth/approve/${id}`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    fetchTelemetry();
+  const deleteUser = async (userId) => {
+    if (!window.confirm("Permanently remove this user?")) return;
+    await fetch(`${API}/users/${userId}`, { method: 'DELETE', headers: getHeaders() });
+    loadData();
   };
-
-  const handleRejectUser = async (id) => {
-    await fetch(`http://localhost:5000/api/auth/reject/${id}`, {
-      method: 'DELETE',
-      headers: { Authorization: `Bearer ${token}` }
-    });
-    fetchTelemetry();
-  };
-
-  const totalCount = projects.length;
-  const approvedCount = projects.filter(p => p.status === 'Approved').length;
-  const underReviewCount = projects.filter(p => p.status === 'Under Review' || p.status === 'Proposed').length;
-  const conflictCount = projects.filter(p => p.status === 'Flagged Conflict' || p.similarityIndex >= 60).length;
 
   const filteredProjects = projects.filter(p => {
-    const matchesDomain = filterDomain === 'All' || p.domain === filterDomain;
-    const q = search.toLowerCase();
-    const titleMatch = p.title?.toLowerCase().includes(q);
-    const supervisorMatch = p.supervisorName && p.supervisorName.toLowerCase().includes(q);
-    const leadStudentMatch = p.studentName?.toLowerCase().includes(q) || p.studentEmail?.toLowerCase().includes(q);
-    const teamMemberMatch = p.teamMembers && p.teamMembers.some(
-      m => m.name?.toLowerCase().includes(q) || m.email?.toLowerCase().includes(q)
-    );
-    return matchesDomain && (titleMatch || supervisorMatch || leadStudentMatch || teamMemberMatch);
+    if (filterFaculty !== 'ALL' && p.faculty !== filterFaculty) return false;
+    if (filterBatch !== 'ALL' && p.batch !== filterBatch) return false;
+    if (filterAllocation === 'allocated' && (!p.supervisor || p.supervisor === 'Unassigned')) return false;
+    if (filterAllocation === 'unallocated' && p.supervisor && p.supervisor !== 'Unassigned') return false;
+    return true;
   });
 
+  const filteredUsers = allUsers.filter(u => {
+    if (userFilterRole !== 'ALL' && u.role !== userFilterRole) return false;
+    if (userFilterFaculty !== 'ALL' && u.faculty !== userFilterFaculty) return false;
+    if (userFilterBatch !== 'ALL' && u.batch !== userFilterBatch) return false;
+    return true;
+  });
+
+  // Executive Metric Calculations
+  const totalProposals = projects.length;
+  const pendingVerificationsCount = allUsers.filter(u => !u.isVerified).length;
+  const conflictAlertsCount = projects.filter(p => p.status === 'Flagged Conflict' || p.similarityIndex >= 60).length;
+  const activeMentorshipsCount = projects.filter(p => p.supervisor && p.supervisor !== 'Unassigned').length;
+
   return (
-    <div className="space-y-6 text-xs text-slate-100">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/50 border border-slate-800/80 p-5 rounded-2xl">
-        <div>
-          <h2 className="text-sm font-bold tracking-wider uppercase text-white flex items-center gap-2">
-            Institutional Audit &amp; Supervisor Allocation Center
-          </h2>
-          <p className="text-slate-400 mt-0.5">
-            Administer faculty mentor allotments, verify identities, and oversee departmental proposals.
-          </p>
+    <div className="space-y-6">
+      {/* EXECUTIVE SUMMARY METRICS CARDS */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-lg relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-xl"></div>
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Proposals</div>
+            <div className="text-2xl font-black text-white mt-1">{totalProposals}</div>
+          </div>
+          <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20"><FileText className="w-5 h-5"/></div>
         </div>
-        <button
-          onClick={fetchTelemetry}
-          className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition cursor-pointer flex items-center gap-1.5"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Sync Data</span>
+
+        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-lg relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-24 h-24 bg-amber-500/5 rounded-full blur-xl"></div>
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Pending Verifications</div>
+            <div className="text-2xl font-black text-amber-400 mt-1">{pendingVerificationsCount}</div>
+          </div>
+          <div className="p-3 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20"><UserCheck className="w-5 h-5"/></div>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-lg relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-24 h-24 bg-rose-500/5 rounded-full blur-xl"></div>
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Conflict Alerts</div>
+            <div className="text-2xl font-black text-rose-400 mt-1">{conflictAlertsCount}</div>
+          </div>
+          <div className="p-3 bg-rose-500/10 text-rose-400 rounded-xl border border-rose-500/20"><AlertTriangle className="w-5 h-5"/></div>
+        </div>
+
+        <div className="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl flex items-center justify-between shadow-lg relative overflow-hidden">
+          <div className="absolute right-0 top-0 w-24 h-24 bg-emerald-500/5 rounded-full blur-xl"></div>
+          <div>
+            <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active Mentorships</div>
+            <div className="text-2xl font-black text-emerald-400 mt-1">{activeMentorshipsCount}</div>
+          </div>
+          <div className="p-3 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20"><ShieldCheck className="w-5 h-5"/></div>
+        </div>
+      </div>
+
+      {/* MODERNIZED TAB NAVIGATION */}
+      <div className="flex gap-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl w-fit shadow-xl">
+        <button onClick={() => setActiveTab('feed')} className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center gap-2 ${activeTab === 'feed' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-white'}`}>
+          <FileText className="w-3.5 h-3.5"/> Proposals
+        </button>
+        <button onClick={() => setActiveTab('kanban')} className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center gap-2 ${activeTab === 'kanban' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-white'}`}>
+          <Layout className="w-3.5 h-3.5"/> Pipeline
+        </button>
+        <button onClick={() => setActiveTab('users')} className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center gap-2 ${activeTab === 'users' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-white'}`}>
+          <Users className="w-3.5 h-3.5"/> Users Directory
+          {pendingVerificationsCount > 0 && <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-black text-[9px] rounded-full">{pendingVerificationsCount}</span>}
+        </button>
+        <button onClick={() => setActiveTab('analytics')} className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center gap-2 ${activeTab === 'analytics' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'text-slate-400 hover:text-white'}`}>
+          <BarChart2 className="w-3.5 h-3.5"/> Analytics
         </button>
       </div>
 
-      {/* Analytics KPI Tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 bg-slate-900/50 border border-slate-800/80 rounded-2xl flex items-center gap-4">
-          <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 rounded-xl">
-            <FolderGit2 className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Total Registry</span>
-            <p className="text-2xl font-mono font-bold text-white mt-0.5">{totalCount}</p>
-          </div>
-        </div>
-        <div className="p-5 bg-slate-900/50 border border-slate-800/80 rounded-2xl flex items-center gap-4">
-          <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl">
-            <CheckCircle2 className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Allotted &amp; Approved</span>
-            <p className="text-2xl font-mono font-bold text-emerald-400 mt-0.5">{approvedCount}</p>
-          </div>
-        </div>
-        <div className="p-5 bg-slate-900/50 border border-slate-800/80 rounded-2xl flex items-center gap-4">
-          <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
-            <Clock className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Pending Allotment</span>
-            <p className="text-2xl font-mono font-bold text-amber-400 mt-0.5">{underReviewCount}</p>
-          </div>
-        </div>
-        <div className="p-5 bg-slate-900/50 border border-slate-800/80 rounded-2xl flex items-center gap-4">
-          <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl">
-            <ShieldAlert className="w-5 h-5" />
-          </div>
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400">Redundancy Conflicts</span>
-            <p className="text-2xl font-mono font-bold text-rose-400 mt-0.5">{conflictCount}</p>
-          </div>
-        </div>
-      </div>
+      {activeTab === 'feed' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/60 p-4 border border-slate-800 rounded-2xl">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-400">Department Roster</h2>
+            
+            <div className="flex flex-wrap items-center gap-2 bg-slate-950 border border-slate-800 p-1.5 rounded-xl text-xs">
+              <Filter className="w-3.5 h-3.5 text-indigo-400 ml-1" />
+              <select value={filterAllocation} onChange={e => setFilterAllocation(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-white outline-none font-bold text-indigo-400">
+                <option value="ALL">All Allocations</option>
+                <option value="allocated">Allocated Projects</option>
+                <option value="unallocated">Unallocated Projects</option>
+              </select>
 
-      {/* Identity Verification Queue */}
-      <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center gap-2">
-          <UserPlus className="w-4 h-4 text-amber-400" />
-          <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400">
-            Pending User Verification ({pendingUsers.length})
-          </h3>
-        </div>
-        {pendingUsers.length === 0 ? (
-          <div className="p-6 text-center text-slate-500">
-            No pending registration requests.
+              <select value={filterFaculty} onChange={e => setFilterFaculty(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-white outline-none">
+                <option value="ALL">All Faculties</option>
+                <option value="BCA">BCA</option>
+                <option value="BSC.CSIT">BSc.CSIT</option>
+                <option value="BIT">BIT</option>
+              </select>
+
+              <select value={filterBatch} onChange={e => setFilterBatch(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-white outline-none">
+                <option value="ALL">All Batches</option>
+                <option value="2021">2021</option>
+                <option value="2022">2022</option>
+                <option value="2023">2023</option>
+                <option value="2024">2024</option>
+              </select>
+            </div>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+
+          {filteredProjects.length === 0 ? (
+            <div className="p-12 text-center text-slate-500 bg-slate-900/30 rounded-2xl border border-slate-800 border-dashed">No projects found matching the selected filters.</div>
+          ) : filteredProjects.map(p => (
+            <div key={p._id} className="p-5 bg-slate-900/60 border border-slate-800 rounded-2xl space-y-3 shadow-xl">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] uppercase text-indigo-400 font-bold tracking-wider">{p.domain}</span>
+                    <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 rounded-md text-[9px] font-bold border border-indigo-500/20">{p.faculty} • {p.batch}</span>
+                  </div>
+                  <h3 className="font-bold text-white text-base">{p.title}</h3>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <span className={`px-2.5 py-1 rounded-lg text-xs font-bold h-fit ${p.status === 'Approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : p.status === 'Flagged Conflict' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>{p.status}</span>
+                  {p.status !== 'Approved' && (
+                    <button onClick={() => deleteProject(p._id)} className="px-2.5 py-1 bg-rose-500/10 hover:bg-rose-500/20 text-[10px] text-rose-400 rounded-lg font-bold transition flex items-center gap-1 border border-rose-500/20">
+                      <Trash2 className="w-3 h-3" /> Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">{p.abstract}</p>
+
+              {p.documents && p.documents.length > 0 && (
+                <div className="pt-2 flex flex-wrap gap-2">
+                  {p.documents.map((doc, idx) => (
+                    <a key={idx} href={`${SERVER_URL}${doc.url}`} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-950 border border-slate-800 text-indigo-400 text-[11px] font-bold rounded-xl hover:bg-slate-900 transition">
+                      <Paperclip className="w-3.5 h-3.5" /> {doc.name || `File ${idx + 1}`}
+                    </a>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row justify-between sm:items-center text-[11px] pt-3 border-t border-slate-800 text-slate-400 font-bold gap-2">
+                <span>Team: <strong className="text-slate-200">{p.teamMembers ? p.teamMembers.map(m => m.name).join(', ') : p.studentName}</strong></span>
+                <div className="flex items-center gap-2">
+                  <span className="text-slate-400">Guide:</span>
+                  <select value={p.supervisor} onChange={(e) => assignSupervisor(p._id, e.target.value)} className="bg-slate-950 border border-indigo-500/40 text-indigo-300 px-3 py-1 rounded-xl outline-none cursor-pointer font-bold">
+                    <option value="Unassigned">Unassigned</option>
+                    {supervisorsList.map(sup => (
+                      <option key={sup._id} value={sup.name}>{sup.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <span className={p.similarityIndex >= 60 ? 'text-rose-400' : 'text-emerald-400'}>{p.similarityIndex}% Match Index</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'kanban' && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          {['Under Review', 'Flagged Conflict', 'Approved', 'Rejected'].map(statusColumn => (
+            <div key={statusColumn} className="bg-slate-900/40 p-4 rounded-2xl border border-slate-800 min-h-[500px]">
+              <h3 className="text-xs font-bold mb-4 uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                <span>{statusColumn}</span>
+                <span className="px-2 py-0.5 bg-slate-800 text-slate-300 rounded-lg text-[10px]">{filteredProjects.filter(p => p.status === statusColumn).length}</span>
+              </h3>
+              <div className="space-y-3">
+                {filteredProjects.filter(p => p.status === statusColumn).map(p => (
+                  <div key={p._id} className="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-xl space-y-2 hover:border-indigo-500/50 transition">
+                    <div className="text-[9px] font-bold text-indigo-400 tracking-wider uppercase">{p.faculty} • {p.batch}</div>
+                    <h4 className="text-xs font-bold text-white">{p.title}</h4>
+                    <div className="text-[10px] text-slate-400 pt-2 border-t border-slate-900">{p.teamMembers ? p.teamMembers.map(m => m.name).join(', ') : p.studentName}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'users' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900/60 p-4 border border-slate-800 rounded-2xl">
+            <h2 className="text-sm font-bold uppercase tracking-wider text-indigo-400">System Users Directory</h2>
+            <div className="flex flex-wrap items-center gap-2 bg-slate-950 border border-slate-800 p-1.5 rounded-xl text-xs">
+              <Filter className="w-3.5 h-3.5 text-indigo-400 ml-1" />
+              <select value={userFilterRole} onChange={e => setUserFilterRole(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-white outline-none">
+                <option value="ALL">All Roles</option>
+                <option value="student">Students</option>
+                <option value="supervisor">Supervisors</option>
+                <option value="admin">Admins</option>
+              </select>
+              <select value={userFilterFaculty} onChange={e => setUserFilterFaculty(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-white outline-none">
+                <option value="ALL">All Faculties</option>
+                <option value="BCA">BCA</option>
+                <option value="BSC.CSIT">BSc.CSIT</option>
+                <option value="BIT">BIT</option>
+              </select>
+              <select value={userFilterBatch} onChange={e => setUserFilterBatch(e.target.value)} className="bg-slate-900 border border-slate-800 rounded px-2.5 py-1 text-white outline-none">
+                <option value="ALL">All Batches</option>
+                <option value="2021">2021</option>
+                <option value="2022">2022</option>
+                <option value="2023">2023</option>
+                <option value="2024">2024</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+            <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="border-b border-slate-800 text-[10px] uppercase text-slate-500 font-bold bg-slate-950/40">
-                  <th className="py-3 px-4">Name</th>
-                  <th className="py-3 px-4">Email</th>
-                  <th className="py-3 px-4">Requested Role</th>
-                  <th className="py-3 px-4 text-right">Verification Action</th>
+                <tr className="bg-slate-950 text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                  <th className="p-4 font-bold">Name</th>
+                  <th className="p-4 font-bold">Email</th>
+                  <th className="p-4 font-bold">Role</th>
+                  <th className="p-4 font-bold">Faculty / Batch</th>
+                  <th className="p-4 font-bold">Associated Projects</th>
+                  <th className="p-4 font-bold">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60 text-slate-300">
-                {pendingUsers.map(user => (
-                  <tr key={user._id} className="hover:bg-slate-800/30 transition">
-                    <td className="py-3 px-4 font-semibold text-white">{user.name}</td>
-                    <td className="py-3 px-4 font-mono">{user.email}</td>
-                    <td className="py-3 px-4">
-                      <span className="text-[9px] bg-slate-800 px-2 py-0.5 rounded uppercase font-bold text-slate-300">
-                        {user.role}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right space-x-2">
-                      <button 
-                        onClick={() => handleApproveUser(user._id)}
-                        className="px-3 py-1.5 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 rounded-lg transition font-medium"
-                      >
-                        Approve
-                      </button>
-                      <button 
-                        onClick={() => handleRejectUser(user._id)}
-                        className="px-3 py-1.5 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 rounded-lg transition font-medium"
-                      >
-                        Reject
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+              <tbody className="divide-y divide-slate-800">
+                {filteredUsers.map(u => {
+                  const userProjects = projects.filter(p => 
+                    u.role === 'student' ? (p.studentEmail === u.email || p.teamMembers?.some(m => m.email === u.email)) : (p.supervisor === u.name)
+                  );
+
+                  const isExpanded = expandedUserId === u._id;
+
+                  return (
+                    <React.Fragment key={u._id}>
+                      <tr className="hover:bg-slate-900/40 transition">
+                        <td className="p-4 font-bold text-white flex items-center gap-2">
+                          {u.name}
+                          {!u.isVerified && <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 rounded-md text-[9px] font-bold border border-amber-500/20">Pending</span>}
+                        </td>
+                        <td className="p-4 text-slate-400">{u.email}</td>
+                        <td className="p-4"><span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase ${u.role === 'admin' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' : u.role === 'supervisor' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}`}>{u.role}</span></td>
+                        <td className="p-4 text-slate-300 font-semibold">{u.faculty ? `${u.faculty} (${u.batch})` : '—'}</td>
+                        <td className="p-4">
+                          <button 
+                            onClick={() => setExpandedUserId(isExpanded ? null : u._id)}
+                            className="text-indigo-400 font-bold hover:underline flex items-center gap-1.5 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800"
+                          >
+                            <span>{userProjects.length} Project(s)</span>
+                            {isExpanded ? <ChevronUp className="w-3.5 h-3.5"/> : <ChevronDown className="w-3.5 h-3.5"/>}
+                          </button>
+                        </td>
+                        <td className="p-4 space-x-2">
+                          <button onClick={() => verifyUser(u._id)} className={`px-3 py-1.5 rounded-xl text-[10px] font-bold transition ${u.isVerified ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'}`}>
+                            {u.isVerified ? 'Verified' : 'Verify'}
+                          </button>
+                          {u.role !== 'admin' && (
+                            <button onClick={() => deleteUser(u._id)} className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl text-[10px] font-bold border border-rose-500/20">Remove</button>
+                          )}
+                        </td>
+                      </tr>
+
+                      {isExpanded && (
+                        <tr className="bg-slate-950/90">
+                          <td colSpan="6" className="p-4">
+                            <div className="pl-6 space-y-2">
+                              <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Associated Project List & Status</h4>
+                              {userProjects.length === 0 ? (
+                                <div className="text-slate-500 text-xs italic">No active project assignments found for this user.</div>
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  {userProjects.map(proj => (
+                                    <div 
+                                      key={proj._id} 
+                                      onClick={() => setSelectedProjectModal(proj)}
+                                      className="bg-slate-900 border border-slate-800 p-3.5 rounded-2xl flex justify-between items-center cursor-pointer hover:border-indigo-500 transition shadow-md"
+                                    >
+                                      <div>
+                                        <div className="text-white font-bold text-xs hover:underline">{proj.title}</div>
+                                        <div className="text-[10px] text-slate-400 mt-0.5 font-semibold">{proj.faculty} • {proj.batch}</div>
+                                      </div>
+                                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold ${proj.status === 'Approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : proj.status === 'Flagged Conflict' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+                                        {proj.status}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        )}
-      </div>
-
-      {/* Filter and Search Bar for Projects */}
-      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-slate-900/50 border border-slate-800/80 p-4 rounded-2xl">
-        <div className="relative w-full sm:w-96">
-          <Search className="w-3.5 h-3.5 absolute left-3 top-3 text-slate-500" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by title, student, group member, or faculty..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
-          />
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
-          <Filter className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-          <select
-            value={filterDomain}
-            onChange={(e) => setFilterDomain(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-          >
-            <option value="All">All Research Tracks</option>
-            <option value="Distributed Systems">Distributed Systems</option>
-            <option value="Computer Vision">Computer Vision</option>
-            <option value="NLP">NLP</option>
-            <option value="Cybersecurity">Cybersecurity</option>
-            <option value="Cloud">Cloud</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Main Capstone Registry Table */}
-      <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-800">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-            Capstone Cohort Registry ({filteredProjects.length} Records)
-          </h3>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 text-[10px] uppercase text-slate-500 font-bold bg-slate-950/40">
-                <th className="py-3 px-4">Title</th>
-                <th className="py-3 px-4 min-w-[220px]">Candidate / Enrolled Group Members</th>
-                <th className="py-3 px-4">Domain</th>
-                <th className="py-3 px-4">Allot Faculty Supervisor</th>
-                <th className="py-3 px-4 text-center">Overlap</th>
-                <th className="py-3 px-4 text-center">Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 text-slate-300">
-              {filteredProjects.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500">
-                    No proposals match the current filter.
-                  </td>
-                </tr>
-              ) : (
-                filteredProjects.map((p) => (
-                  <tr key={p._id} className="hover:bg-slate-800/30 transition">
-                    <td className="py-3 px-4 font-semibold text-white max-w-xs">
-                      <p className="truncate" title={p.title}>{p.title}</p>
-                      {p.matchingTitle && p.similarityIndex >= 60 && (
-                        <span className="text-[10px] text-rose-400 flex items-center gap-1 mt-0.5">
-                          <AlertTriangle className="w-3 h-3 shrink-0" />
-                          Match: {p.matchingTitle.substring(0, 30)}...
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                          <span className="font-semibold text-slate-100">{p.studentName}</span>
-                          <span className="text-[9px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.2 rounded font-mono uppercase font-bold">Lead</span>
-                        </div>
-                        <p className="text-[10px] text-slate-500 pl-5">{p.studentEmail}</p>
-                        {p.teamMembers && p.teamMembers.length > 0 && (
-                          <div className="pt-1 pl-1 border-t border-slate-800/60 space-y-1">
-                            <span className="text-[9px] font-bold uppercase text-slate-500 tracking-wider flex items-center gap-1">
-                              <Users className="w-3 h-3 text-slate-400" /> Group Partners ({p.teamMembers.length}):
-                            </span>
-                            {p.teamMembers.map((member, idx) => (
-                              <div key={idx} className="pl-4 text-[11px] flex items-center justify-between gap-2">
-                                <span className="text-slate-300 font-medium">{member.name}</span>
-                                <span className="text-[10px] text-slate-500 font-mono">{member.email}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 font-mono text-[10px] text-indigo-400 uppercase">{p.domain}</td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center gap-1.5">
-                        <UserCheck className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                        <select
-                          value={p.supervisorId || ''}
-                          onChange={(e) => handleAllotSupervisor(p._id, e.target.value)}
-                          className="bg-slate-950 border border-slate-800 text-[11px] rounded-lg px-2 py-1 text-white focus:outline-none focus:border-indigo-500 cursor-pointer"
-                        >
-                          <option value="" disabled>-- Select Faculty --</option>
-                          {supervisors.map((s) => (
-                            <option key={s._id} value={s._id}>{s.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </td>
-                    <td className="py-3 px-4 text-center font-mono font-bold">
-                      <span className={`px-2 py-0.5 rounded ${
-                        p.similarityIndex >= 60 
-                          ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' 
-                          : 'text-emerald-400'
-                      }`}>
-                        {p.similarityIndex}%
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-center">
-                      <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                        p.status === 'Approved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                        p.status === 'Flagged Conflict' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' :
-                        p.status === 'Rejected' ? 'bg-slate-800 text-slate-400' :
-                        'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                      }`}>
-                        {p.status}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => setActiveNotificationProject(p)}
-                          className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition cursor-pointer"
-                          title="View Notifications"
-                        >
-                          <Bell className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setSelectedDossierProject(p)}
-                          className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg transition flex items-center gap-1 font-medium cursor-pointer"
-                          title="Print Dossier"
-                        >
-                          <FileSpreadsheet className="w-3.5 h-3.5" />
-                          <span>Dossier</span>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteProject(p._id, p.title)}
-                          className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-lg transition cursor-pointer"
-                          title="Purge / Delete Proposal"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {selectedDossierProject && (
-        <DossierModal
-          project={selectedDossierProject}
-          onClose={() => setSelectedDossierProject(null)}
-          onRefresh={fetchTelemetry}
-        />
       )}
-      {activeNotificationProject && (
-        <NotificationModal
-          project={activeNotificationProject}
-          onClose={() => setActiveNotificationProject(null)}
-        />
+
+      {activeTab === 'analytics' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-slate-900/60 p-6 rounded-2xl border border-slate-800 h-80 shadow-xl">
+            <h3 className="text-sm font-bold mb-4 text-center uppercase tracking-wider text-slate-300">Projects by Domain Track</h3>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={stats.domains} dataKey="count" nameKey="_id" cx="50%" cy="50%" innerRadius={60} outerRadius={80} label>
+                  {stats.domains.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                </Pie>
+                <Tooltip contentStyle={{backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', fontSize: '12px'}}/>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="bg-slate-900/60 p-6 rounded-2xl border border-slate-800 h-80 shadow-xl">
+            <h3 className="text-sm font-bold mb-4 text-center uppercase tracking-wider text-slate-300">Submission Status Breakdown</h3>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={stats.statuses}>
+                <XAxis dataKey="_id" tick={{fontSize: 12, fill: '#94a3b8'}} axisLine={false} tickLine={false}/>
+                <YAxis tick={{fontSize: 12, fill: '#94a3b8'}} axisLine={false} tickLine={false}/>
+                <Tooltip cursor={{fill: '#1e293b'}} contentStyle={{backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px'}}/>
+                <Bar dataKey="count" fill="#6366f1" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+
+      {selectedProjectModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
+            <div className="flex justify-between items-start">
+              <div>
+                <span className="text-[10px] uppercase text-indigo-400 font-bold tracking-wider">{selectedProjectModal.domain}</span>
+                <h3 className="text-base font-bold text-white mt-0.5">{selectedProjectModal.title}</h3>
+              </div>
+              <button onClick={() => setSelectedProjectModal(null)} className="p-1.5 hover:bg-slate-800 text-slate-400 rounded-xl transition">
+                <X className="w-4 h-4"/>
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-4 rounded-2xl text-xs space-y-2.5 border border-slate-800">
+              <div><strong className="text-slate-400">Status:</strong> <span className="text-indigo-400 font-bold">{selectedProjectModal.status}</span></div>
+              <div><strong className="text-slate-400">Milestone Stage:</strong> <span className="text-emerald-400 font-bold">{selectedProjectModal.progressMilestone || 'In Progress'}</span></div>
+              <div><strong className="text-slate-400">Project Partner / Team:</strong> {selectedProjectModal.teamMembers ? selectedProjectModal.teamMembers.map(m => m.name).join(', ') : selectedProjectModal.studentName}</div>
+              <div><strong className="text-slate-400">Assigned Supervisor:</strong> {selectedProjectModal.supervisor}</div>
+              <div><strong className="text-slate-400">Faculty Cohort:</strong> {selectedProjectModal.faculty} • Batch {selectedProjectModal.batch}</div>
+              <div className="pt-2 border-t border-slate-800 text-slate-300 leading-relaxed"><strong className="text-slate-400 block mb-1 uppercase text-[10px] tracking-wider">Abstract:</strong> {selectedProjectModal.abstract}</div>
+            </div>
+
+            <button onClick={() => setSelectedProjectModal(null)} className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 rounded-2xl text-xs font-bold text-white transition shadow-lg shadow-indigo-500/20">
+              Close Details
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
