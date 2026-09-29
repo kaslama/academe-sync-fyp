@@ -17,7 +17,7 @@ export default function Register({ API, switchToLogin, onRegisterSuccess }) {
         body: JSON.stringify(authForm)
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Registration failed');
+      if (!res.ok) throw new Error(data.message || data.error || 'Registration failed');
       onRegisterSuccess(data.message || 'Registration successful. Awaiting admin verification.');
     } catch (err) {
       setAuthError(err.message);
@@ -47,14 +47,14 @@ export default function Register({ API, switchToLogin, onRegisterSuccess }) {
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Full Name</label>
               <div className="relative">
                 <User className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                <input type="text" placeholder="Kashmir Lama" required value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} className="w-full bg-slate-900/90 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white outline-none transition duration-200" />
+                <input type="text" placeholder="Your Name" required value={authForm.name} onChange={e => setAuthForm({...authForm, name: e.target.value})} className="w-full bg-slate-900/90 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white outline-none transition duration-200" />
               </div>
             </div>
             <div>
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Institutional Email</label>
               <div className="relative">
                 <Mail className="w-4 h-4 absolute left-3.5 top-3 text-slate-500" />
-                <input type="email" placeholder="student@tupandah.edu.np" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full bg-slate-900/90 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white outline-none transition duration-200" />
+                <input type="email" placeholder="email@univ.edu" required value={authForm.email} onChange={e => setAuthForm({...authForm, email: e.target.value})} className="w-full bg-slate-900/90 border border-slate-800 focus:border-indigo-500/80 rounded-xl pl-10 pr-4 py-2.5 text-xs text-white outline-none transition duration-200" />
               </div>
             </div>
             <div>
@@ -70,7 +70,6 @@ export default function Register({ API, switchToLogin, onRegisterSuccess }) {
               <select value={authForm.role} onChange={e => setAuthForm({...authForm, role: e.target.value})} className="w-full bg-slate-900/90 border border-slate-800 focus:border-indigo-500/80 rounded-xl px-3 py-2.5 text-xs text-slate-300 outline-none cursor-pointer transition">
                 <option value="student">Student Candidate</option>
                 <option value="supervisor">Faculty Supervisor</option>
-                <option value="admin">Admin / Coordinator</option>
               </select>
             </div>
 

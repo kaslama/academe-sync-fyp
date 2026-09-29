@@ -2,7 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { Send, Paperclip, Trash2, MessageSquare, ExternalLink, Plus, Sparkles, FolderGit2 } from 'lucide-react';
 
 export default function StudentDashboard({ currentUser, token, projects, loadData, SERVER_URL, API }) {
-  const [form, setForm] = useState({ title: '', domain: 'Distributed Systems', abstract: '', partnerEmail: '', document: null });
+  const [form, setForm] = useState({ 
+    title: '', 
+    domain: 'Distributed Systems', 
+    abstract: '', 
+    partnerEmail: '', 
+    document: null,
+    faculty: currentUser?.faculty || 'BCA',
+    batch: currentUser?.batch || '2022'
+  });
   const [similarity, setSimilarity] = useState({ similarityIndex: 0, flagged: false, matchingTitle: '' });
   const [commentText, setCommentText] = useState({});
   const [submitError, setSubmitError] = useState('');
@@ -25,7 +33,7 @@ export default function StudentDashboard({ currentUser, token, projects, loadDat
           const res = await fetch(`${API}/projects/analyze`, {
             method: 'POST',
             headers: getHeaders(),
-            body: JSON.stringify({ title: form.title })
+            body: JSON.stringify({ title: form.title, abstract: form.abstract })
           });
           if (res.ok) {
             setSimilarity(await res.json());
@@ -36,7 +44,7 @@ export default function StudentDashboard({ currentUser, token, projects, loadDat
       }
     }, 300);
     return () => clearTimeout(timer);
-  }, [form.title]);
+  }, [form.title, form.abstract]);
 
   const submitProposal = async (e) => {
     e.preventDefault();
@@ -47,7 +55,9 @@ export default function StudentDashboard({ currentUser, token, projects, loadDat
     formData.append('domain', form.domain);
     formData.append('abstract', form.abstract);
     formData.append('partnerEmail', form.partnerEmail);
-    formData.append('similarityIndex', similarity.similarityIndex || 0);
+    formData.append('similarityIndex', similarity.similarityIndex || similarity.score || 0);
+    formData.append('faculty', form.faculty); 
+    formData.append('batch', form.batch);     
     if (form.document) formData.append('document', form.document);
 
     try {
@@ -59,11 +69,11 @@ export default function StudentDashboard({ currentUser, token, projects, loadDat
       const data = await res.json();
 
       if (!res.ok) {
-        setSubmitError(data.error || 'Failed to submit proposal.');
+        setSubmitError(data.error || data.message || 'Failed to submit proposal.');
         return;
       }
       
-      setForm({ title: '', domain: 'Distributed Systems', abstract: '', partnerEmail: '', document: null });
+      setForm({ ...form, title: '', abstract: '', partnerEmail: '', document: null });
       setSimilarity({ similarityIndex: 0, flagged: false, matchingTitle: '' });
       
       const fileInput = document.getElementById('file-upload');
@@ -165,8 +175,10 @@ export default function StudentDashboard({ currentUser, token, projects, loadDat
             >
               <option>Distributed Systems</option>
               <option>Machine Learning</option>
+              <option>Computer Vision</option>
               <option>Cybersecurity</option>
               <option>Web Development</option>
+              <option>Cloud</option>
             </select>
           </div>
 
@@ -207,7 +219,7 @@ export default function StudentDashboard({ currentUser, token, projects, loadDat
           <div className="p-3.5 bg-slate-950/90 border border-slate-800 rounded-xl space-y-1.5 shadow-inner">
             <div className="flex justify-between font-bold">
               <span className="text-slate-400">Lexical Overlap Index:</span>
-              <span className={similarity.flagged ? 'text-rose-400' : 'text-emerald-400'}>{similarity.similarityIndex || 0}%</span>
+              <span className={similarity.flagged ? 'text-rose-400' : 'text-emerald-400'}>{similarity.similarityIndex || similarity.score || 0}%</span>
             </div>
             {similarity.flagged && <div className="text-rose-400 text-[11px] leading-relaxed">Conflict with existing title: "{similarity.matchingTitle}"</div>}
           </div>
@@ -316,7 +328,7 @@ export default function StudentDashboard({ currentUser, token, projects, loadDat
             <div className="flex flex-col sm:flex-row justify-between sm:items-center text-[11px] pt-3 border-t border-slate-800/80 text-slate-400 font-bold gap-2">
               <div className="flex items-center gap-4">
                 <span>Team: <span className="text-slate-200">{p.teamMembers ? p.teamMembers.map(m => m.name).join(', ') : p.studentName}</span></span>
-                <span>Guide: <span className="text-slate-200">{p.supervisor}</span></span>
+                <span>Guide: <span className="text-slate-200">{p.supervisorName || p.supervisor || 'Unassigned'}</span></span>
               </div>
               <span className={`px-2.5 py-1 rounded-lg border ${p.similarityIndex >= 60 ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>
                 {p.similarityIndex}% Match Score

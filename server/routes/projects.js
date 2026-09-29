@@ -6,7 +6,6 @@ const authMiddleware = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const { calculateSimilarity } = require('../utils/similarity');
 
-// Real-time Lexical Similarity Analysis
 router.post('/analyze', authMiddleware, async (req, res) => {
   try {
     const { title, abstract } = req.body;
@@ -18,13 +17,10 @@ router.post('/analyze', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/projects - Role-Scoped Project Retrieval
 router.get('/', authMiddleware, async (req, res) => {
   try {
     let query = {};
-
     if (req.user.role === 'student') {
-      // Students see only their own projects or projects they are team members of
       query = {
         $or: [
           { studentId: req.user.id },
@@ -32,11 +28,8 @@ router.get('/', authMiddleware, async (req, res) => {
         ]
       };
     } else if (req.user.role === 'supervisor') {
-      // PRIVACY ENFORCEMENT: Supervisors can ONLY view proposals allotted to their specific ID
       query = { supervisorId: req.user.id };
     }
-    // Admins have no filter query and can oversee all projects
-
     const projects = await Project.find(query).sort({ createdAt: -1 });
     res.json(projects);
   } catch (err) {
@@ -44,7 +37,6 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// GET /api/projects/supervisors - List all faculty supervisors (for Admin dropdown)
 router.get('/supervisors', authMiddleware, async (req, res) => {
   try {
     const supervisors = await User.find({ role: 'supervisor' }, 'name email _id');
@@ -54,10 +46,9 @@ router.get('/supervisors', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/projects - Proposal Submission with multi-member support
 router.post('/', authMiddleware, upload.single('document'), async (req, res) => {
   try {
-    const { title, domain, abstract, teamMembers } = req.body;
+    const { title, domain, abstract, teamMembers, faculty, batch } = req.body;
     const corpus = await Project.find({}, 'title abstract');
     const analysis = calculateSimilarity(`${title} ${abstract}`, corpus);
 
@@ -74,6 +65,8 @@ router.post('/', authMiddleware, upload.single('document'), async (req, res) => 
       title,
       domain,
       abstract,
+      faculty: faculty || 'BCA',
+      batch: batch || '2022',
       studentId: req.user.id,
       studentName: req.user.name,
       studentEmail: req.user.email,
@@ -99,7 +92,6 @@ router.post('/', authMiddleware, upload.single('document'), async (req, res) => 
   }
 });
 
-// PATCH /api/projects/:id/allot - ADMIN ONLY: Allot or reassign faculty supervisor
 router.patch('/:id/allot', authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -112,7 +104,7 @@ router.patch('/:id/allot', authMiddleware, async (req, res) => {
 
     project.supervisorId = supervisorId;
     project.supervisorName = supervisorName;
-    project.status = 'Approved'; // Project is officially approved upon allotment
+    project.status = 'Approved'; 
 
     project.notifications.push({
       message: `Admin allotted faculty supervisor: ${supervisorName}. Your proposal is now formally endorsed.`,
@@ -126,14 +118,12 @@ router.patch('/:id/allot', authMiddleware, async (req, res) => {
   }
 });
 
-// PATCH /api/projects/:id/reject - Rejection with mandatory student notification
 router.patch('/:id/reject', authMiddleware, async (req, res) => {
   try {
     const { reason } = req.body;
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    // Ensure only allotted supervisor or admin can execute rejection
     if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
       return res.status(403).json({ message: 'Unauthorized. You can only review your allotted projects.' });
     }
@@ -162,7 +152,6 @@ router.patch('/:id/reject', authMiddleware, async (req, res) => {
   }
 });
 
-// DELETE /api/projects/:id - Soft-delete/purge with persistent notification for students
 router.delete('/:id', authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
@@ -172,7 +161,6 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    // Mark as Deleted and flag for student awareness
     project.status = 'Rejected';
     project.notifications.push({
       message: `PROPOSAL REMOVED / PURGED from registry by Department Chair (${req.user.name}) on ${new Date().toLocaleDateString()}.`,
@@ -180,15 +168,12 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     });
 
     await project.save();
-    // Alternatively remove if hard delete is preferred: await Project.findByIdAndDelete(req.params.id);
-
     res.json({ message: 'Project status set to Rejected/Purged and notification dispatched.' });
   } catch (err) {
     res.status(500).json({ message: 'Purge failed', error: err.message });
   }
 });
 
-// POST /api/projects/:id/messages - Project Consultation Thread
 router.post('/:id/messages', authMiddleware, async (req, res) => {
   try {
     const { text } = req.body;
@@ -197,7 +182,6 @@ router.post('/:id/messages', authMiddleware, async (req, res) => {
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    // Privacy Guard
     if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
       return res.status(403).json({ message: 'Access denied. Project not allotted to you.' });
     }
@@ -222,14 +206,12 @@ router.post('/:id/messages', authMiddleware, async (req, res) => {
   }
 });
 
-// PATCH /api/projects/:id/schedule - Set Viva Schedule & Milestone Deadlines
 router.patch('/:id/schedule', authMiddleware, async (req, res) => {
   try {
     const { scheduledDate, venue, milestoneDeadlines } = req.body;
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    // Privacy Guard
     if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
       return res.status(403).json({ message: 'Access denied. You can only schedule your allotted projects.' });
     }
@@ -264,7 +246,6 @@ router.patch('/:id/schedule', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/projects/:id/milestones/:index/upload - Upload Deliverable
 router.post('/:id/milestones/:index/upload', authMiddleware, upload.single('milestoneFile'), async (req, res) => {
   try {
     const { id, index } = req.params;
@@ -288,7 +269,6 @@ router.post('/:id/milestones/:index/upload', authMiddleware, upload.single('mile
   }
 });
 
-// PATCH /api/projects/:id/milestones - Supervisor Milestone Evaluation
 router.patch('/:id/milestones', authMiddleware, async (req, res) => {
   try {
     const { milestoneIndex, status } = req.body;
@@ -313,7 +293,6 @@ router.patch('/:id/milestones', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/projects/:id/feedback - Feedback entry
 router.post('/:id/feedback', authMiddleware, async (req, res) => {
   try {
     const { comments, decision } = req.body;
