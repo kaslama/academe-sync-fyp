@@ -39,17 +39,33 @@ export default function App() {
     setLoading(true);
     try {
       const res = await fetch(`${API}/projects`, { headers: getHeaders() });
-      if (res.ok) setProjects(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(Array.isArray(data) ? data : []);
+      } else {
+        setProjects([]);
+      }
 
       const notifRes = await fetch(`${API}/notifications`, { headers: getHeaders() });
-      if (notifRes.ok) setNotifications(await notifRes.json());
+      if (notifRes.ok) {
+        const notifData = await notifRes.json();
+        setNotifications(Array.isArray(notifData) ? notifData : []);
+      } else {
+        setNotifications([]);
+      }
 
       if (currentUser?.role === 'admin') {
         const supRes = await fetch(`${API}/users/supervisors`, { headers: getHeaders() });
-        if (supRes.ok) setSupervisorsList(await supRes.json());
+        if (supRes.ok) {
+          const supData = await supRes.json();
+          setSupervisorsList(Array.isArray(supData) ? supData : []);
+        }
 
         const usersRes = await fetch(`${API}/users`, { headers: getHeaders() });
-        if (usersRes.ok) setAllUsers(await usersRes.json());
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          setAllUsers(Array.isArray(usersData) ? usersData : []);
+        }
       }
       if (currentUser?.role === 'admin' || currentUser?.role === 'supervisor') {
         const statsRes = await fetch(`${API}/projects/stats`, { headers: getHeaders() });
@@ -57,6 +73,8 @@ export default function App() {
       }
     } catch (e) { 
       console.error(e); 
+      setProjects([]);
+      setNotifications([]);
     } finally {
       setLoading(false);
     }
@@ -104,47 +122,53 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 font-sans selection:bg-indigo-600 selection:text-white">
-      <header className="flex flex-col sm:flex-row justify-between items-center pb-6 mb-6 border-b border-slate-800/80 gap-4 bg-slate-900/60 backdrop-blur-xl px-6 rounded-2xl shadow-xl">
+    <div className="min-h-screen bg-slate-100 print:bg-white text-slate-800 p-6 font-sans selection:bg-red-600 selection:text-white">
+      <header className="flex flex-col sm:flex-row justify-between items-center pb-6 mb-6 border-b border-slate-300 print:border-black gap-4 bg-white print:bg-transparent px-6 rounded-2xl shadow-sm print:shadow-none relative z-50">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-600/10 border border-indigo-500/20 rounded-2xl shadow-inner">
-            <Database className="text-indigo-400 w-5 h-5" />
+          <div className="p-2.5 bg-red-50 border border-red-200 rounded-2xl shadow-inner print:shadow-none print:border-black">
+            <Database className="text-red-600 print:text-black w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-tight">AcademeSync</h1>
-            <p className="text-[10px] font-mono uppercase tracking-widest text-slate-500">FYP Verification Portal</p>
+            <h1 className="text-base font-bold text-slate-900 print:text-black tracking-tight">AcademeSync</h1>
+            <p className="text-[10px] font-mono uppercase tracking-widest text-slate-500 print:text-slate-800">FYP Verification Portal</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 print:hidden">
           <div className="text-right">
-            <div className="text-xs font-bold text-white">{currentUser.name}</div>
-            <div className="text-[10px] uppercase text-indigo-400 font-mono tracking-wider">
+            <div className="text-xs font-bold text-slate-900">{currentUser.name}</div>
+            <div className="text-[10px] uppercase text-red-600 font-mono tracking-wider">
               {currentUser.role} {currentUser.faculty ? `• ${currentUser.faculty} (${currentUser.batch})` : ''}
             </div>
           </div>
           
           <div className="relative">
-            <button onClick={toggleNotifications} className="p-2.5 bg-slate-900 border border-slate-800 rounded-2xl hover:bg-slate-800 transition relative shadow-sm cursor-pointer">
-              <Bell className="w-4 h-4 text-slate-300" />
-              {notifications.some(n => !n.read) && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-rose-500 border-2 border-slate-900 rounded-full"></span>}
+            <button onClick={toggleNotifications} className="p-2.5 bg-white border border-slate-300 rounded-2xl hover:bg-slate-50 transition relative shadow-sm cursor-pointer" title="Notifications">
+              <Bell className="w-4 h-4 text-slate-700" />
+              {notifications.some(n => !n.read) && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-600 border-2 border-white rounded-full"></span>}
             </button>
             
             {showNotifications && (
-              <div className="absolute right-0 mt-3 w-72 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl z-50 py-3 max-h-80 overflow-y-auto backdrop-blur-2xl">
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 px-4">Notifications</h3>
+              /* FIXED POSITIONING ESCAPES SIBLING OVERFLOW-HIDDEN CLIPPING */
+              <div className="fixed right-6 top-20 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl z-[99999] py-3 max-h-80 overflow-y-auto text-slate-800">
+                <div className="px-4 pb-2 border-b border-slate-100 flex justify-between items-center mb-1">
+                  <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Notifications</h3>
+                  <span className="text-[10px] bg-red-50 text-red-600 px-2 py-0.5 rounded-full font-bold">
+                    {notifications.filter(n => !n.read).length} Unread
+                  </span>
+                </div>
                 {notifications.length === 0 ? (
-                  <div className="text-xs text-slate-500 px-4 pb-2">No recent activity.</div>
-                ) : notifications.map((n, i) => (
-                  <div key={i} className={`px-4 py-2.5 text-xs border-b border-slate-800/50 last:border-0 ${n.read ? 'text-slate-400' : 'bg-slate-800/50 text-white font-semibold'}`}>
-                    {n.message}
+                  <div className="text-xs text-slate-500 px-4 py-3">No recent activity.</div>
+                ) : [...notifications].reverse().map((n, i) => (
+                  <div key={i} className={`px-4 py-2.5 text-xs border-b border-slate-100 last:border-0 ${n.read ? 'text-slate-500' : 'bg-slate-50 text-slate-900 font-semibold'}`}>
+                    <p>{n.message}</p>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          <button onClick={handleLogout} className="p-2.5 bg-slate-900 border border-slate-800 text-rose-400 rounded-2xl hover:bg-rose-500/10 hover:border-rose-500/20 transition shadow-sm cursor-pointer" title="Log Out Session">
+          <button onClick={handleLogout} className="p-2.5 bg-white border border-slate-300 text-red-600 rounded-2xl hover:bg-red-50 hover:border-red-300 transition shadow-sm cursor-pointer" title="Log Out Session">
             <LogOut className="w-4 h-4" />
           </button>
         </div>
@@ -152,7 +176,7 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto">
         {loading ? (
-          <div className="text-center py-16 text-slate-500 text-xs font-semibold">Loading synchronized workspace...</div>
+          <div className="text-center py-16 text-slate-500 text-xs font-semibold print:hidden">Loading synchronized workspace...</div>
         ) : (
           <>
             {currentUser.role === 'admin' && (

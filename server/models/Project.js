@@ -28,7 +28,22 @@ const FeedbackSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now }
 });
 
-// Audit notification entry
+const CommentSchema = new mongoose.Schema({
+  author: { type: String, required: true },
+  text: { type: String, required: true },
+  date: { type: Date, default: Date.now }
+});
+
+const DocumentSchema = new mongoose.Schema({
+  name: String,
+  url: String
+});
+
+const LinkSchema = new mongoose.Schema({
+  title: String,
+  url: String
+});
+
 const NotificationEventSchema = new mongoose.Schema({
   message: { type: String, required: true },
   type: { type: String, enum: ['submission', 'milestone', 'schedule', 'status', 'feedback'], default: 'status' },
@@ -47,7 +62,7 @@ const ProjectSchema = new mongoose.Schema(
     studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     studentName: { type: String, required: true },
     studentEmail: { type: String, required: true },
-    teamMembers: [TeamMemberSchema], // Multi-Member Student Group
+    teamMembers: [TeamMemberSchema],
     status: { 
       type: String, 
       enum: ['Proposed', 'Under Review', 'Approved', 'Flagged Conflict', 'Rejected'], 
@@ -57,6 +72,10 @@ const ProjectSchema = new mongoose.Schema(
     matchingTitle: { type: String, default: '' },
     supervisorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     supervisorName: { type: String, default: 'Unassigned' },
+    supervisor: { type: String, default: 'Unassigned' },
+    progressMilestone: { type: String, default: 'In Progress' },
+    faculty: { type: String, default: 'BCA' },
+    batch: { type: String, default: '2022' },
     vivaSchedule: {
       scheduledDate: { type: Date, default: null },
       venue: { type: String, default: 'Pending Board Assignment' }
@@ -70,7 +89,10 @@ const ProjectSchema = new mongoose.Schema(
       ]
     },
     messages: [MessageSchema],
-    notifications: [NotificationEventSchema], // Auto-tracked notification log
+    comments: [CommentSchema],
+    documents: [DocumentSchema],
+    links: [LinkSchema],
+    notifications: [NotificationEventSchema],
     documentPath: { type: String, default: '' },
     feedbackHistory: [FeedbackSchema]
   },

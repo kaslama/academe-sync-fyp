@@ -3,18 +3,18 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+require('dotenv').config();
 
 const authRoutes = require('./routes/auth');
 const projectRoutes = require('./routes/projects');
 const User = require('./models/User');
 const { verifyToken, authorizeRoles } = require('./middleware/auth');
 
-require('dotenv').config();
-
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Setup upload directory for milestone deliverables
 const uploadDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 app.use('/uploads', express.static(uploadDir));

@@ -61,6 +61,14 @@ router.post('/', authMiddleware, upload.single('document'), async (req, res) => 
       }
     }
 
+    const initialDocs = [];
+    if (req.file) {
+      initialDocs.push({
+        name: req.file.originalname,
+        url: `/uploads/${req.file.filename}`
+      });
+    }
+
     const projectData = {
       title,
       domain,
@@ -76,7 +84,9 @@ router.post('/', authMiddleware, upload.single('document'), async (req, res) => 
       status: analysis.score >= 60 ? 'Flagged Conflict' : 'Under Review',
       supervisorId: null,
       supervisorName: 'Unassigned',
+      supervisor: 'Unassigned',
       documentPath: req.file ? `/uploads/${req.file.filename}` : '',
+      documents: initialDocs,
       notifications: [
         {
           message: `Proposal submitted. VSM Lexical Overlap Index: ${analysis.score}%. Awaiting Department Chair supervisor allotment.`,
@@ -92,63 +102,114 @@ router.post('/', authMiddleware, upload.single('document'), async (req, res) => 
   }
 });
 
-router.patch('/:id/allot', authMiddleware, async (req, res) => {
+// Generic Project Update (Status, Supervisor, Milestone)
+router.patch('/:id', authMiddleware, async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ message: 'Only the Department Chair / Admin can allocate faculty supervisors.' });
-    }
-
-    const { supervisorId, supervisorName } = req.body;
+    const { status, supervisor, progressMilestone } = req.body;
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    project.supervisorId = supervisorId;
-    project.supervisorName = supervisorName;
-    project.status = 'Approved'; 
-
-    project.notifications.push({
-      message: `Admin allotted faculty supervisor: ${supervisorName}. Your proposal is now formally endorsed.`,
-      type: 'status'
-    });
+    if (status) project.status = status;
+    if (supervisor) {
+      project.supervisor = supervisor;
+      project.supervisorName = supervisor;
+    }
+    if (progressMilestone) project.progressMilestone = progressMilestone;
 
     await project.save();
     res.json(project);
   } catch (err) {
-    res.status(500).json({ message: 'Supervisor allocation failed', error: err.message });
+    res.status(500).json({ message: 'Update failed', error: err.message });
   }
 });
 
-router.patch('/:id/reject', authMiddleware, async (req, res) => {
+// Feedback Comments Thread
+router.post('/:id/comments', authMiddleware, async (req, res) => {
   try {
-    const { reason } = req.body;
+    const { text } = req.body;
+    if (!text || !text.trim()) return res.status(400).json({ message: 'Comment cannot be empty' });
+
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
 
-    if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Unauthorized. You can only review your allotted projects.' });
-    }
-
-    project.status = 'Rejected';
-    const rejectReason = reason || 'Topic or methodology did not satisfy institutional criteria.';
-
-    project.notifications.push({
-      message: `PROPOSAL REJECTED by ${req.user.name} (${req.user.role.toUpperCase()}). Directive: ${rejectReason}`,
-      type: 'feedback'
-    });
-
-    if (!project.feedbackHistory) project.feedbackHistory = [];
-    project.feedbackHistory.push({
+    if (!project.comments) project.comments = [];
+    project.comments.push({
       author: req.user.name,
-      role: req.user.role,
-      comments: `Proposal rejected. Reason: ${rejectReason}`,
-      decision: 'Rejected',
+      text: text.trim(),
       date: new Date()
     });
-
     await project.save();
+    res.json(project.comments);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to post comment', error: err.message });
+  }
+});
+
+// Document Upload on Existing Project
+router.post('/:id/document', authMiddleware, upload.single('document'), async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    if (req.file) {
+      if (!project.documents) project.documents = [];
+      project.documents.push({
+        name: req.file.originalname,
+        url: `/uploads/${req.file.filename}`
+      });
+      await project.save();
+    }
     res.json(project);
   } catch (err) {
-    res.status(500).json({ message: 'Rejection failed', error: err.message });
+    res.status(500).json({ message: 'Document upload failed', error: err.message });
+  }
+});
+
+// Remove Document
+router.delete('/:id/document/:filename', authMiddleware, async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    if (project.documents) {
+      project.documents = project.documents.filter(doc => !doc.url.includes(req.params.filename));
+      await project.save();
+    }
+    res.json(project);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to delete document', error: err.message });
+  }
+});
+
+// Add Project Link
+router.post('/:id/links', authMiddleware, async (req, res) => {
+  try {
+    const { title, url } = req.body;
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    if (!project.links) project.links = [];
+    project.links.push({ title, url });
+    await project.save();
+    res.json(project.links);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to add link', error: err.message });
+  }
+});
+
+// Remove Project Link
+router.delete('/:id/links/:linkId', authMiddleware, async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+
+    if (project.links) {
+      project.links = project.links.filter(l => l._id.toString() !== req.params.linkId);
+      await project.save();
+    }
+    res.json(project.links);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to remove link', error: err.message });
   }
 });
 
@@ -157,172 +218,12 @@ router.delete('/:id', authMiddleware, async (req, res) => {
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Only administrators can delete proposals.' });
     }
-
     const project = await Project.findById(req.params.id);
     if (!project) return res.status(404).json({ message: 'Project not found' });
-
-    project.status = 'Rejected';
-    project.notifications.push({
-      message: `PROPOSAL REMOVED / PURGED from registry by Department Chair (${req.user.name}) on ${new Date().toLocaleDateString()}.`,
-      type: 'status'
-    });
-
-    await project.save();
-    res.json({ message: 'Project status set to Rejected/Purged and notification dispatched.' });
+    await Project.findByIdAndDelete(req.params.id);
+    res.json({ message: 'Project deleted successfully.' });
   } catch (err) {
-    res.status(500).json({ message: 'Purge failed', error: err.message });
-  }
-});
-
-router.post('/:id/messages', authMiddleware, async (req, res) => {
-  try {
-    const { text } = req.body;
-    if (!text || !text.trim()) return res.status(400).json({ message: 'Message text cannot be empty' });
-
-    const project = await Project.findById(req.params.id);
-    if (!project) return res.status(404).json({ message: 'Project not found' });
-
-    if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Access denied. Project not allotted to you.' });
-    }
-
-    project.messages.push({
-      senderId: req.user.id,
-      senderName: req.user.name,
-      senderRole: req.user.role,
-      text: text.trim(),
-      timestamp: new Date()
-    });
-
-    project.notifications.push({
-      message: `New message from ${req.user.name} (${req.user.role.toUpperCase()}).`,
-      type: 'status'
-    });
-
-    await project.save();
-    res.status(201).json(project.messages);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to record message', error: err.message });
-  }
-});
-
-router.patch('/:id/schedule', authMiddleware, async (req, res) => {
-  try {
-    const { scheduledDate, venue, milestoneDeadlines } = req.body;
-    const project = await Project.findById(req.params.id);
-    if (!project) return res.status(404).json({ message: 'Project not found' });
-
-    if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Access denied. You can only schedule your allotted projects.' });
-    }
-
-    if (scheduledDate || venue) {
-      project.vivaSchedule = {
-        scheduledDate: scheduledDate ? new Date(scheduledDate) : project.vivaSchedule.scheduledDate,
-        venue: venue || project.vivaSchedule.venue
-      };
-      project.notifications.push({
-        message: `Viva Voce Defense scheduled for ${new Date(scheduledDate).toLocaleString()} (Venue: ${venue || 'TBD'}).`,
-        type: 'schedule'
-      });
-    }
-
-    if (Array.isArray(milestoneDeadlines)) {
-      milestoneDeadlines.forEach((item) => {
-        if (project.milestones[item.index] && item.deadline) {
-          project.milestones[item.index].deadline = new Date(item.deadline);
-          project.notifications.push({
-            message: `Milestone "${project.milestones[item.index].title}" target deadline set to ${new Date(item.deadline).toLocaleDateString()}.`,
-            type: 'schedule'
-          });
-        }
-      });
-    }
-
-    await project.save();
-    res.json(project);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to update schedule', error: err.message });
-  }
-});
-
-router.post('/:id/milestones/:index/upload', authMiddleware, upload.single('milestoneFile'), async (req, res) => {
-  try {
-    const { id, index } = req.params;
-    const project = await Project.findById(id);
-    if (!project) return res.status(404).json({ message: 'Project not found' });
-
-    if (project.milestones && project.milestones[index]) {
-      project.milestones[index].status = 'In Progress';
-      if (req.file) {
-        project.milestones[index].documentPath = `/uploads/${req.file.filename}`;
-      }
-      project.notifications.push({
-        message: `Deliverable uploaded for milestone "${project.milestones[index].title}".`,
-        type: 'milestone'
-      });
-      await project.save();
-    }
-    res.json(project);
-  } catch (err) {
-    res.status(500).json({ message: 'Milestone upload failed', error: err.message });
-  }
-});
-
-router.patch('/:id/milestones', authMiddleware, async (req, res) => {
-  try {
-    const { milestoneIndex, status } = req.body;
-    const project = await Project.findById(req.params.id);
-    if (!project) return res.status(404).json({ message: 'Project not found' });
-
-    if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Access denied. You can only evaluate your allotted projects.' });
-    }
-
-    if (project.milestones[milestoneIndex]) {
-      project.milestones[milestoneIndex].status = status;
-      project.notifications.push({
-        message: `Milestone "${project.milestones[milestoneIndex].title}" reviewed and updated to "${status}".`,
-        type: 'milestone'
-      });
-      await project.save();
-    }
-    res.json(project);
-  } catch (err) {
-    res.status(500).json({ message: 'Milestone update failed', error: err.message });
-  }
-});
-
-router.post('/:id/feedback', authMiddleware, async (req, res) => {
-  try {
-    const { comments, decision } = req.body;
-    const project = await Project.findById(req.params.id);
-    if (!project) return res.status(404).json({ message: 'Project not found' });
-
-    if (req.user.role === 'supervisor' && String(project.supervisorId) !== String(req.user.id)) {
-      return res.status(403).json({ message: 'Access denied. You can only review your allotted projects.' });
-    }
-
-    if (!project.feedbackHistory) project.feedbackHistory = [];
-
-    project.feedbackHistory.push({
-      author: req.user.name,
-      role: req.user.role,
-      comments,
-      decision,
-      date: new Date()
-    });
-
-    if (decision) project.status = decision;
-    project.notifications.push({
-      message: `Evaluation note logged: "${decision}". Feedback: "${comments.substring(0, 40)}..."`,
-      type: 'feedback'
-    });
-
-    await project.save();
-    res.json(project);
-  } catch (err) {
-    res.status(500).json({ message: 'Failed to record feedback', error: err.message });
+    res.status(500).json({ message: 'Deletion failed', error: err.message });
   }
 });
 
